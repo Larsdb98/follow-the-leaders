@@ -1,0 +1,23 @@
+[project]
+name = "follow_the_leaders"
+version = "0.1.0"
+description = "Stock trading strategy that examines 13F reports of publicly listed companies to get insights on their investments. It will give live alerts for potential trade opportunities."
+authors = [
+    {name = "Lars del Bubba",email = "larsdb98@gmail.com"}
+]
+license = {text = "MIT License"}
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "beautifulsoup4 (>=4.14.2,<5.0.0)",
+    "panel (>=1.8.1,<2.0.0)",
+    "yfinance (>=0.2.66,<0.3.0)",
+    "lxml (>=6.0.2,<7.0.0)",
+    "numpy (>=2.3.3,<3.0.0)",
+    "pandas (>=2.3.3,<3.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
