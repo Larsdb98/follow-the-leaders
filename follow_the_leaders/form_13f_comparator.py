@@ -11,7 +11,12 @@ class Form13FComparator:
     BASE_URL = "https://data.sec.gov/submissions/CIK{}.json"
     SEC_HEADERS = SEC_HEADERS
 
-    def __init__(self, cik: str, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
+    def __init__(
+        self,
+        cik: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ):
         self.cik = cik.zfill(10)
         self.submissions = None
 
@@ -56,7 +61,7 @@ class Form13FComparator:
 
                 if len(urls) == count:
                     break
-                
+
         if len(urls) < 2:
             if len(urls) == 0:
                 raise ValueError(
@@ -74,16 +79,22 @@ class Form13FComparator:
         soup = BeautifulSoup(xml_text, "lxml-xml")
         holdings = []
         for info in soup.find_all("infoTable"):
-            issuer = info.find("nameOfIssuer").text if info.find("nameOfIssuer") else None
+            issuer = (
+                info.find("nameOfIssuer").text if info.find("nameOfIssuer") else None
+            )
             cusip = info.find("cusip").text if info.find("cusip") else None
             value = int(info.find("value").text) * 1000 if info.find("value") else None
-            shares = int(info.find("sshPrnamt").text) if info.find("sshPrnamt") else None
-            holdings.append({
-                "issuer": issuer,
-                "cusip": cusip,
-                "value_usd": value,
-                "shares": shares,
-            })
+            shares = (
+                int(info.find("sshPrnamt").text) if info.find("sshPrnamt") else None
+            )
+            holdings.append(
+                {
+                    "issuer": issuer,
+                    "cusip": cusip,
+                    "value_usd": value,
+                    "shares": shares,
+                }
+            )
         return pd.DataFrame(holdings)
 
     def get_last_two_filings(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -98,7 +109,6 @@ class Form13FComparator:
 
         return filings[0], filings[1]  # latest, previous
 
-
     def compare_filings(self) -> Dict[str, pd.DataFrame]:
         latest, previous = self.get_last_two_filings()
 
@@ -107,23 +117,26 @@ class Form13FComparator:
 
         print(f"Type of latest_date: {type(latest_date)}")
 
-
         # Index by CUSIP
         latest_idx = latest.set_index("cusip")
         previous_idx = previous.set_index("cusip")
 
         new_buys = latest_idx.loc[~latest_idx.index.isin(previous_idx.index)].copy()
-        new_buys["rank_value"] = new_buys["value_usd"].rank(ascending=False, method="first")
-
+        new_buys["rank_value"] = new_buys["value_usd"].rank(
+            ascending=False, method="first"
+        )
 
         exits = previous_idx.loc[~previous_idx.index.isin(latest_idx.index)].copy()
 
-        common = latest_idx.join(previous_idx, lsuffix="_new", rsuffix="_old", how="inner")
+        common = latest_idx.join(
+            previous_idx, lsuffix="_new", rsuffix="_old", how="inner"
+        )
 
         increases = common[common["shares_new"] > common["shares_old"]].copy()
         increases["issuer"] = increases["issuer_new"]
-        increases["rank_value"] = increases["value_usd_new"].rank(ascending=False, method="first")
-
+        increases["rank_value"] = increases["value_usd_new"].rank(
+            ascending=False, method="first"
+        )
 
         reductions = common[common["shares_new"] < common["shares_old"]].copy()
         reductions["issuer"] = reductions["issuer_new"]
@@ -134,29 +147,48 @@ class Form13FComparator:
             "new_buys": new_buys.reset_index(),
             "exits": exits.reset_index(),
             "increases": increases.reset_index(),
-            "reductions": reductions.reset_index()
+            "reductions": reductions.reset_index(),
         }
 
 
 def main() -> int:
-    comparator = Form13FComparator("1045810") # Nvidia CIK for the example
-    
+    comparator = Form13FComparator("1045810")  # Nvidia CIK for the example
+
     # comparator = Form13FComparator("1045810", start_date=datetime(2024, 1, 1), end_date=datetime(2024, 12, 31))
     changes = comparator.compare_filings()
 
     print(f"Comparing filings: {changes['previous_date']} ➝ {changes['latest_date']}")
 
     print("\n🟢 New Buys (ranked by $ value):")
-    print(changes["new_buys"].sort_values("rank_value")[["issuer", "cusip", "shares", "value_usd", "rank_value"]])
+    print(
+        changes["new_buys"].sort_values("rank_value")[
+            ["issuer", "cusip", "shares", "value_usd", "rank_value"]
+        ]
+    )
 
     print("\n📈 Increases (ranked by $ value):")
-    print(changes["increases"].sort_values("rank_value")[["issuer", "cusip", "shares_new", "shares_old", "value_usd_new", "rank_value"]])
+    print(
+        changes["increases"].sort_values("rank_value")[
+            [
+                "issuer",
+                "cusip",
+                "shares_new",
+                "shares_old",
+                "value_usd_new",
+                "rank_value",
+            ]
+        ]
+    )
 
     print("\n❌ Exits:")
     print(changes["exits"][["issuer", "cusip", "shares", "value_usd"]])
 
     print("\n📉 Reductions:")
-    print(changes["reductions"][["issuer", "cusip", "shares_new", "shares_old", "value_usd_new"]])
+    print(
+        changes["reductions"][
+            ["issuer", "cusip", "shares_new", "shares_old", "value_usd_new"]
+        ]
+    )
 
     return 0
 
