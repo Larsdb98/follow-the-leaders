@@ -159,14 +159,14 @@ def main() -> int:
 
     print(f"Comparing filings: {changes['previous_date']} ➝ {changes['latest_date']}")
 
-    print("\n🟢 New Buys (ranked by $ value):")
+    print("\n New Buys (ranked by $ value):")
     print(
         changes["new_buys"].sort_values("rank_value")[
             ["issuer", "cusip", "shares", "value_usd", "rank_value"]
         ]
     )
 
-    print("\n📈 Increases (ranked by $ value):")
+    print("\n Increases (ranked by $ value):")
     print(
         changes["increases"].sort_values("rank_value")[
             [
@@ -180,10 +180,10 @@ def main() -> int:
         ]
     )
 
-    print("\n❌ Exits:")
+    print("\n Exits:")
     print(changes["exits"][["issuer", "cusip", "shares", "value_usd"]])
 
-    print("\n📉 Reductions:")
+    print("\n Reductions:")
     print(
         changes["reductions"][
             ["issuer", "cusip", "shares_new", "shares_old", "value_usd_new"]
