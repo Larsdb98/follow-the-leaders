@@ -40,7 +40,9 @@ class Form13FFetcher:
             if form == "13F-HR":  # holdings report
                 accession = forms["accessionNumber"][i].replace("-", "")
                 base_url = f"https://www.sec.gov/Archives/edgar/data/{int(self.cik)}/{accession}"
+                filing_date = forms["filingDate"][i]
 
+                print(f"Filing Date: {filing_date}")
                 # Look inside the Index.json for actual file names
                 index_url = f"{base_url}/index.json"
                 r = requests.get(index_url, headers=self.SEC_HEADERS)
@@ -98,7 +100,9 @@ class Form13FFetcher:
 
 
 def main():
-    fetcher = Form13FFetcher("1045810")  # nvidia:  0001045810, berkshire: 1067983
+    fetcher = Form13FFetcher(
+        "1840244"
+    )  # nvidia:  1045810, berkshire: 1067983, palantir: 1321655
     df = fetcher.get_latest_holdings()
 
     print(df.head())

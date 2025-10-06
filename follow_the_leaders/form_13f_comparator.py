@@ -115,8 +115,6 @@ class Form13FComparator:
         latest_date = latest["filing_date"].iloc[0]
         prev_date = previous["filing_date"].iloc[0]
 
-        print(f"Type of latest_date: {type(latest_date)}")
-
         # Index by CUSIP
         latest_idx = latest.set_index("cusip")
         previous_idx = previous.set_index("cusip")
