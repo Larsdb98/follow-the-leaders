@@ -214,3 +214,6 @@ __marimo__/
 .vscode
 */CUSIP.csv
 */funds_watchlist.csv
+
+data/
+logs/
