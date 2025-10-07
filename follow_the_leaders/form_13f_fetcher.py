@@ -4,6 +4,9 @@ from bs4 import BeautifulSoup
 
 from follow_the_leaders.secret_vars import SEC_HEADERS
 
+# THIS SCRIPT NEEDS TO BE RETIRED. IT'S NO LONGER USED
+# TODO: ELIMINATE IMPORTS OF THIS CLASS ON OTHER SCRIPTS BEFORE DELETING.
+
 
 class Form13FFetcher:
     """

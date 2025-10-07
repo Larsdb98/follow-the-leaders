@@ -1,111 +1,147 @@
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
+from typing import List, Dict, Optional
+import json
+import hashlib
+from datetime import datetime, timedelta
+from pathlib import Path
+
 from follow_the_leaders.secret_vars import SEC_HEADERS
 
 
 class FilingsFetcher:
     """
-    Generalized SEC latest Form fetcher (13F, 4, 144, etc.)
+    Unified fetcher for SEC filings (Form 4, 144, 13F, etc.) with local caching and purging.
     """
 
     BASE_URL = "https://data.sec.gov/submissions/CIK{}.json"
     SEC_HEADERS = SEC_HEADERS
 
-    def __init__(self, cik: str):
-        self.cik = cik.zfill(10)
-        self.submissions = None
+    CACHE_DIR = Path("data/cache")
+    CACHE_TTL_HOURS = 12  # Re-fetch every 12 hours
+    PURGE_OLDER_THAN_DAYS = 7  # Remove cache files older than 7 days
 
-    def _fetch_submissions(self):
+    def __init__(self, cik: str, cache_dir: str | Path = None):
+        self.cik = cik.zfill(10)
+        self.submissions: Optional[dict] = None
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._purge_old_cache_files()  # Clean old cache entries
+
+    # ─────────────────────────────────────────────
+    # Cache helpers
+    # ─────────────────────────────────────────────
+    def _cache_path(self) -> Path:
+        hashed = hashlib.md5(self.cik.encode()).hexdigest()
+        return self.CACHE_DIR / f"{hashed}_submissions.json"
+
+    def _load_cache(self) -> Optional[dict]:
+        path = self._cache_path()
+        if not path.exists():
+            return None
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime)
+            if datetime.now() - mtime > timedelta(hours=self.CACHE_TTL_HOURS):
+                return None
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def _save_cache(self, data: dict) -> None:
+        with open(self._cache_path(), "w") as f:
+            json.dump(data, f)
+
+    def _purge_old_cache_files(self):
+        """Delete cache files older than PURGE_OLDER_THAN_DAYS."""
+        now = datetime.now()
+        removed = 0
+        for file in self.CACHE_DIR.glob("*_submissions.json"):
+            try:
+                mtime = datetime.fromtimestamp(file.stat().st_mtime)
+                if now - mtime > timedelta(days=self.PURGE_OLDER_THAN_DAYS):
+                    file.unlink()
+                    removed += 1
+            except Exception:
+                continue
+        if removed > 0:
+            print(f"🧹 Purged {removed} old cache file(s).")
+
+    # ─────────────────────────────────────────────
+    # SEC data fetch
+    # ─────────────────────────────────────────────
+    def _fetch_submissions(self) -> None:
+        cached = self._load_cache()
+        if cached:
+            self.submissions = cached
+            return
+
+        print(f"🔄 Fetching fresh SEC data for CIK {self.cik}...")
         url = self.BASE_URL.format(self.cik)
         r = requests.get(url, headers=self.SEC_HEADERS)
         r.raise_for_status()
         self.submissions = r.json()
+        self._save_cache(self.submissions)
 
-    def _find_text(self, soup, tag_name):
-        """Safe helper to extract text from an XML tag."""
-        tag = soup.find(tag_name)
-        return tag.text.strip() if tag else None
-
-    def _get_latest_filing(self, form_type: str) -> dict:
-        """
-        Generic method to get metadata for the latest given form type.
-        Returns a dict with { 'accession', 'date', 'url', 'form' }.
-        """
+    # ─────────────────────────────────────────────
+    # Retrieve filings metadata
+    # ─────────────────────────────────────────────
+    def get_recent_filings(self, form_type: str, count: int = 5) -> List[Dict]:
         if self.submissions is None:
             self._fetch_submissions()
 
-        forms = self.submissions["filings"]["recent"]
+        filings = []
+        recent = self.submissions["filings"]["recent"]
 
-        for i, form in enumerate(forms["form"]):
-            if form == form_type:
-                accession = forms["accessionNumber"][i].replace("-", "")
-                filing_date = forms["filingDate"][i]
+        for i, f_type in enumerate(recent["form"]):
+            if f_type.upper() == form_type.upper():
+                accession = recent["accessionNumber"][i].replace("-", "")
+                filing_date = recent["filingDate"][i]
                 base_url = f"https://www.sec.gov/Archives/edgar/data/{int(self.cik)}/{accession}"
-
-                # Fetch index.json to list included files
                 index_url = f"{base_url}/index.json"
-                r = requests.get(index_url, headers=self.SEC_HEADERS)
-                if r.status_code != 200:
-                    continue
 
-                files = r.json()["directory"]["item"]
-                return {
-                    "accession": accession,
-                    "filing_date": filing_date,
-                    "base_url": base_url,
-                    "files": files,
-                    "form": form,
-                }
+                try:
+                    r = requests.get(index_url, headers=self.SEC_HEADERS)
+                    r.raise_for_status()
+                    files = r.json()["directory"]["item"]
+                except Exception:
+                    files = []
 
-        raise ValueError(f"No {form_type} filing found for CIK {self.cik}")
+                filings.append(
+                    {
+                        "accession": accession,
+                        "filing_date": filing_date,
+                        "base_url": base_url,
+                        "files": files,
+                    }
+                )
+
+                if len(filings) >= count:
+                    break
+
+        if not filings:
+            raise ValueError(f"No filings found for {form_type} (CIK {self.cik})")
+
+        return filings
 
     # ─────────────────────────────────────────────
-    # PARSERS
+    # XML helper
     # ─────────────────────────────────────────────
-    def parse_13f(self, filing: dict) -> pd.DataFrame:
-        """Parse Form 13F infotable."""
-        xml_file = next(
-            (f for f in filing["files"] if "info" in f["name"].lower()), None
-        )
-        if not xml_file:
-            raise ValueError("No infotable XML found.")
-        url = f"{filing['base_url']}/{xml_file['name']}"
-        r = requests.get(url, headers=self.SEC_HEADERS)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "xml")
+    @staticmethod
+    def _find_text(soup, tag_name: str) -> Optional[str]:
+        tag = soup.find(tag_name)
+        return tag.text.strip() if tag else None
 
-        holdings = []
-        for info in soup.find_all("infoTable"):
-            holdings.append(
-                {
-                    "issuer": info.find_text("nameOfIssuer"),
-                    "cusip": info.find_text("cusip"),
-                    "value_usd": (
-                        int(info.find_text("value")) * 1000
-                        if info.find("value")
-                        else None
-                    ),
-                    "shares": (
-                        int(info.find_text("sshPrnamt"))
-                        if info.find("sshPrnamt")
-                        else None
-                    ),
-                }
-            )
-
-        df = pd.DataFrame(holdings)
-        df["filing_date"] = filing["filing_date"]
-        df["form_type"] = "13F-HR"
-        return df
-
-    def parse_form4(self, filing: dict) -> pd.DataFrame:
-        """Parse insider trades from Form 4 XML."""
+    # ─────────────────────────────────────────────
+    # Parse Form 4 (insider trades)
+    # ─────────────────────────────────────────────
+    def parse_form4(self, filing: Dict) -> pd.DataFrame:
         xml_file = next(
             (f for f in filing["files"] if f["name"].lower().endswith(".xml")), None
         )
         if not xml_file:
             raise ValueError("No XML file found for Form 4.")
+
         url = f"{filing['base_url']}/{xml_file['name']}"
         r = requests.get(url, headers=self.SEC_HEADERS)
         r.raise_for_status()
@@ -113,6 +149,7 @@ class FilingsFetcher:
 
         insider_name = self._find_text(soup, "rptOwnerName")
         issuer_name = self._find_text(soup, "issuerName")
+
         trades = []
         for trans in soup.find_all("nonDerivativeTransaction"):
             trade = {
@@ -130,48 +167,64 @@ class FilingsFetcher:
         df["form_type"] = "4"
         return df
 
-    def parse_form144(self, filing: dict) -> pd.DataFrame:
-        """Parse Form 144 text (basic metadata only)."""
-        text_file = next(
+    # ─────────────────────────────────────────────
+    # Parse Form 144 (insider sales)
+    # ─────────────────────────────────────────────
+    def parse_form144(self, filing: Dict) -> pd.DataFrame:
+        txt_file = next(
             (f for f in filing["files"] if f["name"].lower().endswith(".txt")), None
         )
-        if not text_file:
-            raise ValueError("No text file found for Form 144.")
-        url = f"{filing['base_url']}/{text_file['name']}"
-        return pd.DataFrame(
+        if not txt_file:
+            raise ValueError("No .txt file found for Form 144.")
+
+        url = f"{filing['base_url']}/{txt_file['name']}"
+        r = requests.get(url, headers=self.SEC_HEADERS)
+        r.raise_for_status()
+
+        text = r.text
+        snippet = text[:300].replace("\n", " ")
+
+        df = pd.DataFrame(
             [
                 {
+                    "issuer": None,
+                    "filing_url": url,
+                    "summary": snippet,
                     "filing_date": filing["filing_date"],
                     "form_type": "144",
-                    "source_url": url,
                 }
             ]
         )
 
-    # ─────────────────────────────────────────────
-    # PUBLIC API
-    # ─────────────────────────────────────────────
-    def get_latest(self, form_type: str) -> pd.DataFrame:
-        filing = self._get_latest_filing(form_type)
-        if form_type == "13F-HR":
-            return self.parse_13f(filing)
-        elif form_type == "4":
-            return self.parse_form4(filing)
-        elif form_type == "144":
-            return self.parse_form144(filing)
-        else:
-            raise ValueError(f"Unsupported form type: {form_type}")
+        return df
 
 
 def main():
-    fetcher = FilingsFetcher("1321655")  # Palantir
-    form4_df = fetcher.get_latest("4")
-    print("Latest Form 4 filing:")
-    print(form4_df.head())
+    """
+    Quick test for the FilingsFetcher class.
+    Tries to pull the latest Form 4 and 144 filings for NVIDIA (CIK 1045810).
+    """
+    cik = "1045810"  # NVIDIA
+    fetcher = FilingsFetcher(cik)
 
-    form144_df = fetcher.get_latest("144")
-    print("Latest Form 144 filing:")
-    print(form144_df.head())
+    # Test caching and Form 4 parsing
+    try:
+        filings = fetcher.get_recent_filings("4", count=2)
+        print(f"\n✅ Found {len(filings)} recent Form 4 filings for CIK {cik}")
+        for f in filings:
+            df = fetcher.parse_form4(f)
+            print(df.head(), "\n")
+    except Exception as e:
+        print(f"⚠️ Error fetching Form 4: {e}")
+
+    # Test Form 144 parsing
+    try:
+        filings = fetcher.get_recent_filings("144", count=1)
+        print(f"\n✅ Found {len(filings)} recent Form 144 filings for CIK {cik}")
+        df = fetcher.parse_form144(filings[0])
+        print(df.head(), "\n")
+    except Exception as e:
+        print(f"⚠️ Error fetching Form 144: {e}")
 
 
 if __name__ == "__main__":
