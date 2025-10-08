@@ -5,8 +5,8 @@ from follow_the_leaders import (
     app_parser,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
-    Controller,
 )
+from follow_the_leaders.controller import Controller
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     log_info("_______________ Follow The Leaders _______________")
 
     controller = Controller(
-        funds_csv_path="watchlist.csv",
+        funds_csv_path="follow_the_leaders/watchlist.csv",
         telegram_bot_token=TELEGRAM_BOT_TOKEN,
         telegram_chat_id=TELEGRAM_CHAT_ID,
         start_date=None,
@@ -28,6 +28,9 @@ def main():
         log_path="data/processed_filings.csv",
         debug=strategy_debug,
     )
+
+    # TODO: Implement logic for daily checks
+    controller.run_daily_check()
 
 
 if __name__ == "__main__":

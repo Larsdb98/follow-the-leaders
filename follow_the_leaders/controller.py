@@ -57,6 +57,7 @@ class Controller:
     # Process Form 13F — institutional holdings
     # ─────────────────────────────────────────────
     def process_fund(self, cik: str, fund_name: str):
+        """Handle Form 13F filings (fund holdings updates)."""
         try:
             comparator = Form13FComparator(
                 cik, start_date=self.start_date, end_date=self.end_date
@@ -86,23 +87,34 @@ class Controller:
                 f"<b>Comparing:</b> {results['previous_date']} → {results['latest_date']}\n\n"
             )
 
-            new_buys = results["new_buys"]
-            exits = results["exits"]
+            new_buys = results["new_buys"].copy()
+            exits = results["exits"].copy()
 
+            # Convert reported value (in thousands) to actual dollars
+            if "value_usd" in new_buys.columns:
+                new_buys["value_usd"] = new_buys["value_usd"].astype(float) / 1000
+            if "value_usd" in exits.columns:
+                exits["value_usd"] = exits["value_usd"].astype(float) / 1000
+
+            # 🟢 New buys
             if not new_buys.empty:
                 msg += f"<b>🟢 New Buys ({len(new_buys)})</b>\n"
-                for _, row in new_buys.head(5).iterrows():
-                    msg += f"• {row['issuer']} — ${row['value_usd']:,}\n"
-                if len(new_buys) > 5:
-                    msg += f"…and {len(new_buys) - 5} more.\n"
+                for _, row in new_buys.iterrows():
+                    issuer = row.get("issuer", "Unknown")
+                    value_usd = row.get("value_usd", 0.0)
+                    shares = row.get("shares", 0)
+                    msg += f"• {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
 
+            # ❌ Exits
             if not exits.empty:
                 msg += f"\n<b>❌ Exits ({len(exits)})</b>\n"
-                for _, row in exits.head(5).iterrows():
-                    msg += f"• {row['issuer']}\n"
-                if len(exits) > 5:
-                    msg += f"…and {len(exits) - 5} more.\n"
+                for _, row in exits.iterrows():
+                    issuer = row.get("issuer", "Unknown")
+                    value_usd = row.get("value_usd", 0.0)
+                    shares = row.get("shares", 0)
+                    msg += f"• {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
 
+            # No changes
             if new_buys.empty and exits.empty:
                 msg += "<i>No new buys or exits detected.</i>\n"
 
@@ -115,7 +127,6 @@ class Controller:
         except Exception as e:
             err_msg = f"Error processing {fund_name} (CIK {cik}): {e}"
             log_error(f"Controller :: {err_msg}")
-            log_debug(f"Controller :: Sending the following message: {msg}")
             self.alerter.send_message(f"<b>{err_msg}</b>")
 
     # ─────────────────────────────────────────────
