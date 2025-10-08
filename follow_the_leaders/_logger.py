@@ -12,7 +12,7 @@ def configure_logger(log_level, log_dir: str = ""):
     if not __is_logger_configured__:
         __is_logger_configured__ = True
 
-        fmt = logging.Formatter("[%(asctime)s] [Tracker %(levelname)s]: %(message)s")
+        fmt = logging.Formatter("[%(asctime)s] [Strategy %(levelname)s]: %(message)s")
         _logger.setLevel(log_level)
 
         if log_dir:

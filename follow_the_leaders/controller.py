@@ -5,10 +5,16 @@ from follow_the_leaders import (
     FilingTracker,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
+    ROOT_PATH,
+    configure_logger,
+    log_info,
+    log_debug,
+    log_error,
+    log_fatal,
 )
 
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 from typing import Optional
 
@@ -24,9 +30,7 @@ class Controller:
         log_path: str = "data/processed_filings.csv",
         debug: bool = False,
     ):
-        """
-        Controller to orchestrate daily filings fetching and alerts.
-        """
+        """Controller to orchestrate daily filings fetching and alerts."""
         self.funds_csv_path = funds_csv_path
         self.start_date = start_date
         self.end_date = end_date
@@ -43,13 +47,16 @@ class Controller:
         )
 
         if self.debug:
-            print("⚙️ DEBUG MODE ENABLED — No skipping of old or processed filings.\n")
+            log_info(
+                "Controller :: DEBUG MODE ENABLED — No skipping of old or processed filings.\n"
+            )
+
+        log_info("Controller :: Initiated successfully")
 
     # ─────────────────────────────────────────────
-    # Process Fund (13F filings)
+    # Process Form 13F — institutional holdings
     # ─────────────────────────────────────────────
     def process_fund(self, cik: str, fund_name: str):
-        """Handle Form 13F for funds."""
         try:
             comparator = Form13FComparator(
                 cik, start_date=self.start_date, end_date=self.end_date
@@ -64,54 +71,57 @@ class Controller:
             if not self.debug and not self.tracker.is_new_filing(
                 cik, "13F-HR", accession_number
             ):
-                print(f"Skipping {fund_name} ({cik}) — already processed this filing.")
+                log_info(
+                    f"Skipping {fund_name} ({cik}) — already processed this filing."
+                )
                 return
 
             # Skip old filings (>1 day)
             if not self.debug and (datetime.now().date() - latest_date.date()).days > 1:
-                print(f"Skipping {fund_name} — filing too old ({latest_date_str}).")
+                log_info(f"Skipping {fund_name} — filing too old ({latest_date_str}).")
                 return
 
-            # Compose message
-            msg = f"📊 *13F Update for {fund_name}*\n"
-            msg += (
-                f"Comparing {results['previous_date']} ➝ {results['latest_date']}\n\n"
+            msg = (
+                f"<b>📊 13F Update for {fund_name}</b>\n"
+                f"<b>Comparing:</b> {results['previous_date']} → {results['latest_date']}\n\n"
             )
 
             new_buys = results["new_buys"]
             exits = results["exits"]
 
             if not new_buys.empty:
-                msg += f"🟢 *New Buys ({len(new_buys)})*\n"
+                msg += f"<b>🟢 New Buys ({len(new_buys)})</b>\n"
                 for _, row in new_buys.head(5).iterrows():
-                    msg += f"• {row['issuer']} (${row['value_usd']:,})\n"
+                    msg += f"• {row['issuer']} — ${row['value_usd']:,}\n"
                 if len(new_buys) > 5:
-                    msg += f"...and {len(new_buys) - 5} more.\n"
+                    msg += f"…and {len(new_buys) - 5} more.\n"
 
             if not exits.empty:
-                msg += f"\n❌ *Exits ({len(exits)})*\n"
+                msg += f"\n<b>❌ Exits ({len(exits)})</b>\n"
                 for _, row in exits.head(5).iterrows():
                     msg += f"• {row['issuer']}\n"
                 if len(exits) > 5:
-                    msg += f"...and {len(exits) - 5} more.\n"
+                    msg += f"…and {len(exits) - 5} more.\n"
 
             if new_buys.empty and exits.empty:
-                msg += "_No new buys or exits detected._"
+                msg += "<i>No new buys or exits detected.</i>\n"
 
-            msg += "\n\n🕒 Automated scan completed."
+            msg += "\n<i>🕒 Automated scan completed.</i>"
+
+            log_debug(f"Controller :: Sending the following message: {msg}")
             self.alerter.send_message(msg)
             self.tracker.log_filing(cik, "13F-HR", accession_number, latest_date_str)
 
         except Exception as e:
-            err_msg = f"⚠️ Error processing {fund_name} (CIK {cik}): {e}"
-            print(err_msg)
-            self.alerter.send_message(err_msg, parse_mode=None)
+            err_msg = f"Error processing {fund_name} (CIK {cik}): {e}"
+            log_error(f"Controller :: {err_msg}")
+            log_debug(f"Controller :: Sending the following message: {msg}")
+            self.alerter.send_message(f"<b>{err_msg}</b>")
 
     # ─────────────────────────────────────────────
-    # Process Company (Forms 4 and 144)
+    # Process Forms 4 and 144 — insider trades
     # ─────────────────────────────────────────────
     def process_company(self, cik: str, company_name: str):
-        """Handle Forms 4 and 144 for public companies."""
         try:
             fetcher = FilingsFetcher(cik)
 
@@ -122,13 +132,13 @@ class Controller:
                     accession = filing["accession"]
                     filing_date = filing["filing_date"]
 
-                    # Skip already-processed filings
+                    # Skip already processed
                     if not self.debug and not self.tracker.is_new_filing(
                         cik, form_type, accession
                     ):
                         continue
 
-                    # Skip old filings
+                    # Skip old filings (>1 day)
                     date_obj = datetime.strptime(filing_date, "%Y-%m-%d")
                     if (
                         not self.debug
@@ -136,48 +146,125 @@ class Controller:
                     ):
                         continue
 
-                    # Parse Form 4 and Form 144 differently
+                    # Handle Form 4 filings — aggregate trades
                     if form_type == "4":
                         df = fetcher.parse_form4(filing)
                         if not df.empty:
-                            msg = f"🧾 *Form 4 — Insider Trades*\n🏢 {company_name}\n📅 {filing_date}\n\n"
-                            for _, row in df.head(3).iterrows():
-                                msg += (
-                                    f"• {row['insider']} traded {row['shares']} shares "
-                                    f"@ ${row['price']} on {row['transaction_date']}\n"
+                            # Normalize column names — different XMLs sometimes vary
+                            df.columns = [c.lower().strip() for c in df.columns]
+
+                            # Try to locate security title column
+                            possible_cols = [
+                                "securitytitle",
+                                "security_title",
+                                "issuer",
+                                "name",
+                            ]
+                            sec_col = next(
+                                (c for c in possible_cols if c in df.columns), None
+                            )
+                            if sec_col is None:
+                                raise KeyError(
+                                    "No column describing the traded security found."
                                 )
-                            if len(df) > 3:
-                                msg += f"...and {len(df) - 3} more transactions.\n"
+
+                            df["shares"] = pd.to_numeric(
+                                df.get("shares"), errors="coerce"
+                            )
+                            df["price"] = pd.to_numeric(
+                                df.get("price"), errors="coerce"
+                            )
+
+                            # Aggregate total shares and weighted avg price per security
+                            grouped = (
+                                df.dropna(subset=["shares", "price"])
+                                .groupby(sec_col)
+                                .apply(
+                                    lambda g: pd.Series(
+                                        {
+                                            "total_shares": g["shares"].sum(),
+                                            "avg_price": (
+                                                g["shares"] * g["price"]
+                                            ).sum()
+                                            / g["shares"].sum(),
+                                        }
+                                    ),
+                                    include_groups=False,  # needed for newer versions of pandas
+                                )
+                                .reset_index()
+                                .rename(columns={sec_col: "security"})
+                            )
+
+                            # Filter to show only external securities (different from company)
+                            grouped = grouped[
+                                grouped["security"]
+                                .str.lower()
+                                .str.contains(company_name.lower())
+                                == False
+                            ]
+
+                            # If all trades are internal (own stock), still display a summary
+                            msg = (
+                                f"<b>🧾 Form 4 — Insider Trades</b>\n"
+                                f"<b>🏢 {company_name}</b>\n"
+                                f"<b>📅 {filing_date}</b>\n\n"
+                            )
+
+                            if grouped.empty:
+                                total_shares = int(df["shares"].sum())
+                                avg_price = (df["shares"] * df["price"]).sum() / df[
+                                    "shares"
+                                ].sum()
+                                msg += (
+                                    f"• <b>Own stock:</b> {total_shares:,} shares @ ${avg_price:.2f}\n"
+                                    f"<i>(All trades were for {company_name}'s own stock.)</i>"
+                                )
+                            else:
+                                for _, row in grouped.iterrows():
+                                    msg += (
+                                        f"• <b>{row['security']}</b>: "
+                                        f"{int(row['total_shares']):,} shares "
+                                        f"@ ${row['avg_price']:.2f}\n"
+                                    )
+
+                            log_debug(
+                                f"Controller :: Sending the following message: {msg}"
+                            )
                             self.alerter.send_message(msg)
 
+                    # Handle Form 144 filings — simpler link alert
                     elif form_type == "144":
                         df = fetcher.parse_form144(filing)
                         msg = (
-                            f"📜 *Form 144 — Insider Sale Notice*\n🏢 {company_name}\n"
-                            f"📅 {filing_date}\n🔗 {df['filing_url'].iloc[0]}"
+                            f"<b>📜 Form 144 — Insider Sale Notice</b>\n"
+                            f"<b>🏢 {company_name}</b>\n"
+                            f"<b>📅 {filing_date}</b>\n"
+                            f"🔗 <a href='{df['filing_url'].iloc[0]}'>View filing</a>"
                         )
+                        log_debug(f"Controller :: Sending the following message: {msg}")
                         self.alerter.send_message(msg)
 
-                    # Log after alert
+                    # Log after successful alert
                     self.tracker.log_filing(cik, form_type, accession, filing_date)
 
         except Exception as e:
             err_msg = f"⚠️ Error processing {company_name} (CIK {cik}): {e}"
-            print(err_msg)
-            self.alerter.send_message(err_msg, parse_mode=None)
+            log_error(f"Controller :: {err_msg}")
+            self.alerter.send_message(f"<b>{err_msg}</b>")
 
     # ─────────────────────────────────────────────
-    # Main Daily Runner
+    # Main runner
     # ─────────────────────────────────────────────
     def run_daily_check(self):
-        """Iterate over funds & companies, processing filings."""
-        print(f"Starting daily filings check — {datetime.now():%Y-%m-%d %H:%M:%S}")
+        log_info(
+            f"Controller :: Starting daily filings check — {datetime.now():%Y-%m-%d %H:%M:%S}"
+        )
         for _, row in self.funds_df.iterrows():
             cik = row["cik"]
             name = row["fund_name"]
             entity_type = row.get("entity_type", "fund").lower()
 
-            print(f"→ Checking {name} ({cik}) as {entity_type}...")
+            log_info(f"Controller :: Checking {name} ({cik}) as {entity_type}...")
             if entity_type == "fund":
                 self.process_fund(cik, name)
             elif entity_type == "company":
@@ -185,10 +272,17 @@ class Controller:
 
             # Avoid hammering SEC API
             time.sleep(15)
-        print("✅ Daily check completed.")
+        log_info("Controller :: Daily check completed.")
 
 
+# ─────────────────────────────────────────────
+# Test entry point
+# ─────────────────────────────────────────────
 def main():
+    log_level = "DEBUG"
+    log_dir = ROOT_PATH / "logs"
+
+    configure_logger(log_level=log_level, log_dir=log_dir)
     controller = Controller(
         funds_csv_path="watchlist.csv",
         telegram_bot_token=TELEGRAM_BOT_TOKEN,
