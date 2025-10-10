@@ -10,17 +10,17 @@ def app_parser():
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Re-analyses recent filings even if they have already been previously analysed.",
+        help="Since processed filings will no longer show up. This flag re-processes the recent filings.",
     )
     parser.add_argument(
         "--process-144",
         action="store_true",
-        help="Toggle Form 144 processing and notifications. By default, forms 144 are not processed.",
+        help="By default, form 144 analysis is turned off. But can be activated with this flag.",
     )
     parser.add_argument(
         "--run-once",
         action="store_true",
-        help="If True, the daily check will be run immediately. This parameter is set to False by default",
+        help="Useful for debugging purposes, it allows to run the daily check right away instead of waiting for the scheduler to call this.",
     )
 
     arg = parser.parse_args()

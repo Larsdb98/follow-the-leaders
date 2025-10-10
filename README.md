@@ -53,6 +53,12 @@ The following arguments are available:
 3. `--log-level`: Set the logging level of the strategy. It defaults to `INFO` but can also be set to `DEBUG`.
 4. `--run-once`: Useful for debugging purposes, it allows to run the daily check right away instead of waiting for the scheduler to call this.
 
+To show this list of arguments:
+
+```zsh
+poetry run strategy -h
+```
+
 Ideal launch for debugging purposes:
 ```zsh
 poetry run strategy --run-once --log-level DEBUG --debug
