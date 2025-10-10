@@ -2,6 +2,8 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
+from follow_the_leaders._logger import log_debug
+
 
 class FilingTracker:
     def __init__(self, log_path: str | Path = "data/processed_filings.csv"):
@@ -28,7 +30,14 @@ class FilingTracker:
             & (self.df["form_type"] == form_type)
             & (self.df["accession_number"] == accession_number)
         )
-        return not match.any()
+
+        response = not match.any()
+
+        log_debug(
+            f"FilingTracker :: Is the filing {accession_number} of CIK {cik} new? {response}"
+        )
+
+        return response
 
     def log_filing(
         self, cik: str, form_type: str, accession_number: str, filing_date: str
@@ -41,5 +50,8 @@ class FilingTracker:
             "filing_date": filing_date,
             "processed_at": datetime.now().isoformat(timespec="seconds"),
         }
+
         self.df = pd.concat([self.df, pd.DataFrame([new_entry])], ignore_index=True)
         self.df.to_csv(self.log_path, index=False)
+
+        log_debug(f"FilingTracker :: The following filing has been logged: {new_entry}")

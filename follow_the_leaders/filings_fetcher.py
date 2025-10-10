@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from follow_the_leaders.secret_vars import SEC_HEADERS
+from follow_the_leaders._logger import log_debug, log_info, log_error
 
 
 class FilingsFetcher:
@@ -65,7 +66,7 @@ class FilingsFetcher:
             except Exception:
                 continue
         if removed > 0:
-            print(f"🧹 Purged {removed} old cache file(s).")
+            log_info(f"FilingsFetcher :: Purged {removed} old cache file(s).")
 
     # ─────────────────────────────────────────────
     # SEC data fetch
@@ -76,7 +77,7 @@ class FilingsFetcher:
             self.submissions = cached
             return
 
-        print(f"🔄 Fetching fresh SEC data for CIK {self.cik}...")
+        log_info(f"FilingsFetcher :: Fetching fresh SEC data for CIK {self.cik}...")
         url = self.BASE_URL.format(self.cik)
         r = requests.get(url, headers=self.SEC_HEADERS)
         r.raise_for_status()
@@ -87,6 +88,7 @@ class FilingsFetcher:
     # Retrieve filings metadata
     # ─────────────────────────────────────────────
     def get_recent_filings(self, form_type: str, count: int = 5) -> List[Dict]:
+        log_debug(f"FilingsFetcher :: Pulling the {count} most recent filings...")
         if self.submissions is None:
             self._fetch_submissions()
 
@@ -120,6 +122,9 @@ class FilingsFetcher:
                     break
 
         if not filings:
+            log_error(
+                f"FilingsFetcher :: No filings found for {form_type} (CIK {self.cik})"
+            )
             raise ValueError(f"No filings found for {form_type} (CIK {self.cik})")
 
         return filings

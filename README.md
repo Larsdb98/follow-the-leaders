@@ -1,11 +1,9 @@
-# follow-the-leaders
+# Follow the Leaders
 Stock trading strategy that examines Form 13F (for funds), Form 4 and Form 144 of publicly listed companies to get insights on their investments. It will give live alerts for potential trade opportunities.
 
-## In Development
+It communicates findings and potential trade opportunities via Telegram messages through a bot. The form examinations happen every day at 7 AM. This can be adjusted in the strategy's entry point file [main.py](follow_the_leaders/main.py).
 
-More information to come later as the project progresse
-
-## Installation & Deployment
+## Installation
 
 1. Make sure you have Python 3.11 installed on your machine.
 
@@ -41,11 +39,26 @@ More information to come later as the project progresse
     poetry install
     ```
 
-8. Run the strategy:
+## Running The Strategy
 
-    ```zsh
-    poetry run strategy
-    ```
+To run the strategy:
+
+```zsh
+poetry run strategy
+```
+
+The following arguments are available:
+1. `--process-144`: By default, form 144 analysis is turned off. But can be activated with this flag.
+2. `--debug`: Since processed filings will no longer show up. This flag re-processes the recent filings.
+3. `--log-level`: Set the logging level of the strategy. It defaults to `INFO` but can also be set to `DEBUG`.
+4. `--run-once`: Useful for debugging purposes, it allows to run the daily check right away instead of waiting for the scheduler to call this.
+
+Ideal launch for debugging purposes:
+```zsh
+poetry run strategy --run-once --log-level DEBUG --debug
+```
+
+To check if the strategy is still running. Send a message to the Telegram bot and say either `alive` or `status`.
 
 ## Credits
 

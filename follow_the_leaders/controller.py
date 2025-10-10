@@ -86,6 +86,10 @@ class Controller:
                 f"<b>📊 13F Update for {fund_name}</b>\n"
                 f"<b>Comparing:</b> {results['previous_date']} → {results['latest_date']}\n\n"
             )
+            log_msg = (
+                f"13F Update for {fund_name}\n"
+                f"Comparing: {results['previous_date']} -> {results['latest_date']}\n\n"
+            )
 
             new_buys = results["new_buys"].copy()
             exits = results["exits"].copy()
@@ -99,28 +103,40 @@ class Controller:
             # 🟢 New buys
             if not new_buys.empty:
                 msg += f"<b>🟢 New Buys ({len(new_buys)})</b>\n"
+                log_msg += f"New Buys ({len(new_buys)})\n"
+
                 for _, row in new_buys.iterrows():
                     issuer = row.get("issuer", "Unknown")
                     value_usd = row.get("value_usd", 0.0)
                     shares = row.get("shares", 0)
+
                     msg += f"• {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
+                    log_msg += f"+ {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
 
             # ❌ Exits
             if not exits.empty:
                 msg += f"\n<b>❌ Exits ({len(exits)})</b>\n"
+                log_msg += f"\nExits ({len(exits)})\n"
+
                 for _, row in exits.iterrows():
                     issuer = row.get("issuer", "Unknown")
                     value_usd = row.get("value_usd", 0.0)
                     shares = row.get("shares", 0)
+
                     msg += f"• {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
+                    log_msg += f"+ {issuer} — {shares:,} shares (${value_usd:,.0f})\n"
 
             # No changes
             if new_buys.empty and exits.empty:
                 msg += "<i>No new buys or exits detected.</i>\n"
+                log_msg += "No new buys or exits detected.\n"
 
             msg += "\n<i>🕒 Automated scan completed.</i>"
+            log_msg += "\nAutomated scan completed."
 
             log_debug(f"Controller :: Sending the following message: {msg}")
+            log_info(f"Controller :: process_fund: {log_msg}")
+
             self.alerter.send_message(msg)
             self.tracker.log_filing(cik, "13F-HR", accession_number, latest_date_str)
 
@@ -132,7 +148,9 @@ class Controller:
     # ─────────────────────────────────────────────
     # Process Forms 4 and 144 — insider trades
     # ─────────────────────────────────────────────
-    def process_company(self, cik: str, company_name: str):
+    def process_company(
+        self, cik: str, company_name: str, process_form_144: bool = True
+    ):
         try:
             fetcher = FilingsFetcher(cik)
 
@@ -220,6 +238,11 @@ class Controller:
                                 f"<b>🏢 {company_name}</b>\n"
                                 f"<b>📅 {filing_date}</b>\n\n"
                             )
+                            log_msg = (
+                                f"Form 4 — Insider Trades\n"
+                                f"{company_name}\n"
+                                f"{filing_date}\n\n"
+                            )
 
                             if grouped.empty:
                                 total_shares = int(df["shares"].sum())
@@ -230,6 +253,11 @@ class Controller:
                                     f"• <b>Own stock:</b> {total_shares:,} shares @ ${avg_price:.2f}\n"
                                     f"<i>(All trades were for {company_name}'s own stock.)</i>"
                                 )
+                                log_msg += (
+                                    f"+ Own stock: {total_shares:,} shares @ ${avg_price:.2f}\n"
+                                    f"(All trades were for {company_name}'s own stock.)"
+                                )
+
                             else:
                                 for _, row in grouped.iterrows():
                                     msg += (
@@ -237,14 +265,18 @@ class Controller:
                                         f"{int(row['total_shares']):,} shares "
                                         f"@ ${row['avg_price']:.2f}\n"
                                     )
+                                    log_msg += (
+                                        f"+ {row['security']}: "
+                                        f"{int(row['total_shares']):,} shares "
+                                        f"@ ${row['avg_price']:.2f}\n"
+                                    )
 
-                            log_debug(
-                                f"Controller :: Sending the following message: {msg}"
-                            )
+                            log_debug(f"Controller :: Sending the following message: ")
+                            log_info(f"Controller :: process_company: {log_msg}")
                             self.alerter.send_message(msg)
 
                     # Handle Form 144 filings — simpler link alert
-                    elif form_type == "144":
+                    elif form_type == "144" and process_form_144:
                         df = fetcher.parse_form144(filing)
                         msg = (
                             f"<b>📜 Form 144 — Insider Sale Notice</b>\n"
@@ -252,7 +284,15 @@ class Controller:
                             f"<b>📅 {filing_date}</b>\n"
                             f"🔗 <a href='{df['filing_url'].iloc[0]}'>View filing</a>"
                         )
-                        log_debug(f"Controller :: Sending the following message: {msg}")
+                        log_msg = (
+                            f"Form 144 — Insider Sale Notice\n"
+                            f"{company_name}\n"
+                            f"{filing_date}\n"
+                            f"'{df['filing_url'].iloc[0]}'"
+                        )
+
+                        log_debug(f"Controller :: Sending the following message:")
+                        log_info(f"Controller :: process_company: {log_msg}")
                         self.alerter.send_message(msg)
 
                     # Log after successful alert
@@ -266,7 +306,7 @@ class Controller:
     # ─────────────────────────────────────────────
     # Main runner
     # ─────────────────────────────────────────────
-    def run_daily_check(self):
+    def run_daily_check(self, process_form_144: bool = False):
         log_info(
             f"Controller :: Starting daily filings check — {datetime.now():%Y-%m-%d %H:%M:%S}"
         )
@@ -279,7 +319,7 @@ class Controller:
             if entity_type == "fund":
                 self.process_fund(cik, name)
             elif entity_type == "company":
-                self.process_company(cik, name)
+                self.process_company(cik, name, process_form_144=process_form_144)
 
             # Avoid hammering SEC API
             time.sleep(15)
@@ -302,6 +342,7 @@ def main():
         end_date=None,
         log_path="data/processed_filings.csv",
         debug=True,
+        process_form_144=False,
     )
 
     controller.run_daily_check()

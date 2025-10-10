@@ -1,6 +1,7 @@
 from .backtester import Backtester
 from .form_13f_comparator import Form13FComparator
-from .form_13f_fetcher import Form13FFetcher
+
+# from .form_13f_fetcher import Form13FFetcher
 from .filings_fetcher import FilingsFetcher
 from .filing_tracker import FilingTracker
 from .yfinance_fetcher import YFinanceFetcher
