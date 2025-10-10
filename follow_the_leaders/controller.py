@@ -73,7 +73,7 @@ class Controller:
                 cik, "13F-HR", accession_number
             ):
                 log_info(
-                    f"Skipping {fund_name} ({cik}) — already processed this filing."
+                    f"Controller :: Skipping {fund_name} ({cik}) — already processed this filing."
                 )
                 return
 
@@ -165,6 +165,9 @@ class Controller:
                     if not self.debug and not self.tracker.is_new_filing(
                         cik, form_type, accession
                     ):
+                        log_info(
+                            f"Controller :: Skipping {accession} ({cik}) — already processed this filing."
+                        )
                         continue
 
                     # Skip old filings (>1 day)
@@ -173,6 +176,9 @@ class Controller:
                         not self.debug
                         and (datetime.now().date() - date_obj.date()).days > 1
                     ):
+                        log_info(
+                            f"Controller :: Skipping {accession} ({cik}) — filling is too old. (> 1 day)"
+                        )
                         continue
 
                     # Handle Form 4 filings — aggregate trades
